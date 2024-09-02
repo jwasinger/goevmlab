@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
-	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -100,8 +99,8 @@ func evaluate(ctx *cli.Context) error {
 		inputCount     = ctx.Int(inputCountFlag.Name)
 	)
 	alloc := generateAlloc()
-	input := generateBenchInputs(nil, precompile, inputCount)
-	if err := convertToStateTest(fmt.Sprintf("bench-%s", precompileName), "Prague", alloc, 40_000_000, benchContractAddr, input); err != nil {
+	input := generateBenchInputs(rand.Reader, precompile, inputCount)
+	if err := convertToStateTest(fmt.Sprintf("bench-%s", precompileName), "Prague", alloc, 1_000_000_000, benchContractAddr, input); err != nil {
 		return err
 	}
 	return nil
@@ -196,10 +195,11 @@ func randomScalar(r io.Reader) (k *big.Int) {
 	return k
 }
 
+// marshal 32 bit scalar
 func marshalScalar(k *big.Int) (res []byte) {
 	kBytes := k.Bytes()
-	res = make([]byte, 256)
-	copy(res[256-len(kBytes):], kBytes)
+	res = make([]byte, 32)
+	copy(res[32-len(kBytes):], kBytes)
 	return res
 }
 
@@ -208,10 +208,6 @@ func randomFp(r io.Reader) fp.Element {
 	scalar := new(fp.Element)
 	scalar.SetBytes(randFp.Bytes())
 	return *scalar
-}
-
-func marshalFr(elem fr.Element) []byte {
-	return elem.Marshal()
 }
 
 func marshalFp(elem fp.Element) []byte {
@@ -240,7 +236,7 @@ func marshalG2Point(pt *bls12381.G2Affine) []byte {
 
 func genG1MSMInputs(r io.Reader, inputCount int) (res []byte) {
 	for i := 0; i < inputCount; i++ {
-		res = append(res, randomG1Point(r).Marshal()...)
+		res = append(res, marshalG1Point(randomG1Point(r))...)
 		res = append(res, marshalScalar(randomScalar(r))...)
 	}
 	return res
@@ -248,7 +244,7 @@ func genG1MSMInputs(r io.Reader, inputCount int) (res []byte) {
 
 func genG2MSMInputs(r io.Reader, inputCount int) (res []byte) {
 	for i := 0; i < inputCount; i++ {
-		res = append(res, randomG2Point(r).Marshal()...)
+		res = append(res, marshalG2Point(randomG2Point(r))...)
 		res = append(res, marshalScalar(randomScalar(r))...)
 	}
 	return res
@@ -256,8 +252,8 @@ func genG2MSMInputs(r io.Reader, inputCount int) (res []byte) {
 
 func genPairingInputs(r io.Reader, inputCount int) (res []byte) {
 	for i := 0; i < inputCount; i++ {
-		res = append(res, randomG1Point(r).Marshal()...)
-		res = append(res, randomG2Point(r).Marshal()...)
+		res = append(res, marshalG1Point(randomG1Point(r))...)
+		res = append(res, marshalG2Point(randomG2Point(r))...)
 	}
 	return res
 }
@@ -285,8 +281,11 @@ func generateBenchInputs(r io.Reader, precompile common.Address, inputCount int)
 	case common.BytesToAddress([]byte{0x0c}): // g1 mul
 		res = append(res, encodeU128(128+32)...) // input size
 		res = append(res, encodeU128(128)...)    // output size
+		_, _, g1Gen, _ := bls12381.Generators()
 		highArityScalar := new(big.Int)
-		highArityScalar.SetString("0x...", 16)
+		highArityScalar.SetString("50597600879605352240557443896859274688352069811191692694697732254669473040618", 10)
+		precompileInput = append(precompileInput, marshalG1Point(&g1Gen)...)
+		precompileInput = append(precompileInput, marshalScalar(highArityScalar)...)
 	case common.BytesToAddress([]byte{0x0d}): // g1 msm
 		res = append(res, encodeU128(uint64(inputCount)*(128+32))...) // input size
 		res = append(res, encodeU128(128)...)                         // output size
@@ -302,8 +301,11 @@ func generateBenchInputs(r io.Reader, precompile common.Address, inputCount int)
 	case common.BytesToAddress([]byte{0x0f}): // g2 mul
 		res = append(res, encodeU128(256+32)...) // input size
 		res = append(res, encodeU128(256)...)    // output size
+		_, _, _, g2Gen := bls12381.Generators()
 		highArityScalar := new(big.Int)
-		highArityScalar.SetString("0x...", 16)
+		highArityScalar.SetString("50597600879605352240557443896859274688352069811191692694697732254669473040618", 10)
+		precompileInput = append(precompileInput, marshalG2Point(&g2Gen)...)
+		precompileInput = append(precompileInput, marshalScalar(highArityScalar)...)
 	case common.BytesToAddress([]byte{0x10}): // g2 msm
 		res = append(res, encodeU128(uint64(inputCount)*(256+32))...) // input size
 		res = append(res, encodeU128(128)...)                         // output size
@@ -365,8 +367,10 @@ func convertToStateTest(name, fork string, alloc core.GenesisAlloc, gasLimit uin
 	// Also add the sender
 	var sender = common.HexToAddress("a94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	if _, ok := fuzzGenesisAlloc[sender]; !ok {
+		maxBalance := new(big.Int)
+		maxBalance.SetUint64(math.MaxUint64)
 		fuzzGenesisAlloc[sender] = fuzzing.GenesisAccount{
-			Balance: big.NewInt(1000000000000000000), // 1 eth
+			Balance: maxBalance,
 			Nonce:   0,
 			Storage: make(map[common.Hash]common.Hash),
 		}
