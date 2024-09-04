@@ -36,6 +36,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -227,6 +228,22 @@ func RootsEqual(path string, c *cli.Context) (bool, error) {
 	}
 	log.Info("Roots identical", "root", roots[0])
 	return true, nil
+}
+
+func BenchSingleTest(path string, c *cli.Context) error {
+	vms := initVMs(c)
+	for _, vm := range vms {
+		res := testing.Benchmark(func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				_, err := vm.RunStateTest(path, io.Discard, true)
+				if err != nil {
+					b.Fatalf("Error running test", "err", err)
+				}
+			}
+		})
+		log.Debug("Test done", "evm", vm.Name(), "time", res.NsPerOp())
+	}
+	return nil
 }
 
 // RunTests runs a test on all clients.
