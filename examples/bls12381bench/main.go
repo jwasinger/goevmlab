@@ -167,10 +167,12 @@ func generateBenchCode(iterCount int, isNoop bool) *program.Program {
 	}
 	benchCode.Op(ops.POP)
 	// stack: loop counter, precompile address, output size, input size
+/*
 	benchCode.Op(ops.DUP4)
 	benchCode.Op(ops.DUP4)
 	benchCode.Op(ops.SWAP1)
 	benchCode.Op(ops.RETURN)
+*/
 	return benchCode
 }
 func randomG1Point(input io.Reader) *bls12381.G1Affine {
@@ -459,7 +461,7 @@ func convertToStateTest(name, fork string, alloc core.GenesisAlloc, gasLimit uin
 	}
 	mkr.SetTx(tx)
 	mkr.SetPre(&fuzzGenesisAlloc)
-	if err := mkr.Fill(nil); err != nil {
+	if err := mkr.Fill(os.Stdout); err != nil {
 		return err
 	}
 	gst := mkr.ToGeneralStateTest(name)

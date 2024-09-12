@@ -230,10 +230,20 @@ func RootsEqual(path string, c *cli.Context) (bool, error) {
 	return true, nil
 }
 
-func BenchSingleTest(path string, c *cli.Context) error {
+func BenchSingleTest(path string, c *cli.Context) (execTimes map[string]int64, gasUsed uint64) {
 	vms := initVMs(c)
+	res := make(map[string]int64)
 	for _, vm := range vms {
-		res := testing.Benchmark(func(b *testing.B) {
+		// run the benchmark with tracing first to get the gas used
+		traceResult, err := vm.RunStateTest(path, os.Stdout, false)
+		if err != nil {
+			panic(err)
+		}
+		// TODO: don't hardcode the initial alloc
+		gasUsed = 1_000_000_000 - traceResult.EndGas
+
+		// benchmark w/o tracing
+		benchRes := testing.Benchmark(func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				_, err := vm.RunStateTest(path, io.Discard, true)
 				if err != nil {
@@ -241,9 +251,10 @@ func BenchSingleTest(path string, c *cli.Context) error {
 				}
 			}
 		})
-		log.Debug("Test done", "evm", vm.Name(), "time", res.NsPerOp())
+		res[vm.Name()] = benchRes.NsPerOp()
+		fmt.Printf("ns per op: %d\n", benchRes.NsPerOp())
 	}
-	return nil
+	return res, gasUsed
 }
 
 // RunTests runs a test on all clients.
